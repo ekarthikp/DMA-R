@@ -1,0 +1,207 @@
+---
+title: "DMA"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## R 
+```{r Library}
+library(dplyr)
+library(fBasics)
+library(faraway)
+library(ggplot2)
+library(caret)
+```
+## R Library
+
+
+```{r pima}
+# dimension of pima dataset
+dim(pima)
+# data of top 5 rows
+head(pima)
+# summary of pima dataset
+summary(pima)
+# assigning pima dataset to a data frame
+pima_df= pima
+```
+
+## Including Plots
+You can also embed plots, for example:
+
+```{r Plot insulin, echo=FALSE}
+
+
+
+
+pima_df$test_factor= factor(pima_df$test)
+levels(pima_df$test_factor) = c("negative","positive")
+
+ggplot(pima_df, aes(x=insulin, y=..density.., color=test_factor)) +
+  geom_histogram(position='dodge',binwidth = 30, fill="white") + 
+  geom_density(alpha=.2, fill="#FF6666") 
+
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+```{r Plot insulin, echo=FALSE}
+
+
+ggplot(pima_df, aes(x=triceps, y=..density.., color=test_factor)) +
+  geom_histogram(position='dodge',binwidth = 30, fill="white") + 
+  geom_density(alpha=.2, fill="#FF6666") 
+
+
+```
+```{r  check the zeros percentage, echo=FALSE}
+# realised after desnity plots of insulin and triceps  that 0's can be NA but not for all
+lapply(pima_df[1:8], function(x){ length(which(x==0))*100/length(x)})
+```
+```{r  changing 0's to NA , echo=FALSE}
+# not every 0 is NA but 0's of of glucose,insulin,diastolic,triceps,bmi is NA; pregnancy can be 0 so not assigning it with 0
+pima_df$glucose[pima_df$glucose==0] <- NA
+pima_df$insulin[pima_df$insulin==0] <- NA
+pima_df$diastolic[pima_df$diastolic==0] <- NA
+pima_df$triceps[pima_df$triceps==0] <- NA
+pima_df$bmi[pima_df$bmi==0] <- NA
+summary(pima_df)
+summary(pima)
+```
+
+
+
+```{r}
+# imputed the NA in the data with "mice" using stochastic regression imputation
+library("mice")
+
+imp <- mice(pima_df, method = "pmm", m = 1) # Impute data
+pima_imp_df <- complete(imp) # Store data
+summary(pima_imp_df)
+summary(pima_df)
+```
+
+
+
+
+```{r Plot insulin, echo=FALSE}
+#pima_imp_df$test_factor= factor(pima_imp_df$test)
+#levels(pima_imp_df$test_factor) = c("negative","positive")
+
+ggplot(pima_imp_df, aes(x=insulin, y=..density.., color=test_factor)) +
+  geom_histogram(position='dodge',binwidth = 30, fill="white") + 
+  geom_density(alpha=.2, fill="#FF6666") 
+
+
+```
+
+```{r , echo=FALSE}
+#sum(pima_imp_df$insulin<=0)
+outlier_remover <- function(df, feature) {
+boxplot(df[, feature], plot=FALSE)$out
+outliers <- boxplot(df[,feature], plot=FALSE)$out
+x<-df[,feature] 
+df<- df[-which(df[,feature] %in% outliers),]
+return(df)
+}
+pima_imp_df_out=pima_imp_df
+for(feature in c(3:7)){
+pima_imp_df_out=outlier_remover(pima_imp_df_out,feature)
+}
+summary(pima_imp_df_out)
+
+```
+```{r}
+# Nutritional status based on BMI
+pima_imp_df_out$Nutritional_Status <- cut(pima_imp_df_out$bmi, breaks=c(0, 18.5, 25, 30, Inf))
+levels(pima_imp_df_out$Nutritional_Status) = c("Underweight","Normal","Overweight","Obese")
+pima_imp_df_out <- pima_imp_df_out %>% relocate(Nutritional_Status, .before = test)
+```
+
+```{r}
+#Interpretation of Glucose level
+# Interpretation of OGTT (Glucose) - using OGTT levels recommended by DIABETES UK (2019)
+pima_imp_df_out$Glucose_Result <- cut(pima_imp_df_out$glucose, breaks=c(0, 140, 198, Inf))
+levels(pima_imp_df_out$Glucose_Result) = c("Normal","Impaired Glucose Tolerance","Diabetic Level")
+pima_imp_df_out <- pima_imp_df_out %>% relocate(Glucose_Result, .before = test)
+```
+```{r}
+#Observation of Data
+ggplot(pima_imp_df_out, aes(x=Nutritional_Status, color=test_factor)) +
+  geom_bar(position='dodge', fill="white")
+
+ggplot(pima_imp_df_out, aes(x=Glucose_Result, color=test_factor)) +
+  geom_bar(position='dodge', fill="white")
+
+ggplot(pima_imp_df_out, aes(x=age, color=test_factor)) +
+  geom_bar(position='dodge', fill="white")
+
+
+```
+```{r}
+corMat=cor(pima_imp_df_out[,c(1:8)])
+corMat=data.frame(corMat)
+ggcorrplot::ggcorrplot(corMat,lab=TRUE)
+```
+
+```{r}
+
+set.seed(1011) # Set Seed so that same sample can be reproduced in future also
+# Now Selecting 80% of data as sample from total 'n' rows of the data  
+sample <- sample.int(n = nrow(pima_imp_df_out), size = floor(.75*nrow(pima_imp_df_out)), replace = F)
+train <- pima_imp_df_out[sample, ]
+test  <- pima_imp_df_out[-sample, ]
+```
+
+```{r}
+library(e1071)
+x_train=train[,c(1:5,7:10)]
+y_train=train[,11]
+x_test=test[,c(1:5,7:10)]
+y_test=test[,11]
+#y_train = as.factor(y_train)
+#y_test= as.factor(y_test)
+dat = data.frame(x_train, y_train = as.factor(y_train))#(2,4,poly)
+svmfit = svm(y_train ~ ., data = dat, kernel = "radial", cost = 10, scale = TRUE)
+print(svmfit)
+#dat1 = data.frame(x_train[,1:8], y_train = as.factor(y_train))
+#plot(svmfit , dat)
+```
+```{r}
+y_pred <- predict(svmfit, x_test)
+acc_svm <- 100*mean(y_pred==y_test)
+cmL_svm= table(y_test ,y_pred)/(length(y_test)/100)
+cmL_svm
+```
+
+
+```{r}
+train$test=as.factor(train$test)
+ctrl <- trainControl(method="repeatedcv",   # 10fold cross validation
+                     number =10,
+                     repeats=10,         # do 10 repetitions of cv
+                     summaryFunction=twoClassSummary,   # Use AUC to pick the best model
+                     classProbs = TRUE)
+
+
+#Train and Tune the SVM
+set.seed(825)
+train$test=as.factor(train$test)
+  svm.tune <- train(test_factor ~ .,
+                    data = train[c(1:5,7:9,12)],
+                    method = "svmRadial",   # Radial kernel
+                    tuneLength = 10,                   # 10 values of the cost function
+                    preProc = c("center","scale"),  # Center and scale data
+                    metric="ROC",
+                    trControl=ctrl)
+```
+
+```{r}
+p1 <- predict(svm.tune, x_test)
+acc1 <- 100*mean(p1==test$test_factor)
+cmL1 = table(y_test ,p1)/(length(y_test)/100)
+cmL1
+```
+
